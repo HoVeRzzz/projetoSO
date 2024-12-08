@@ -1,0 +1,17 @@
+EX1
+
+
+FEITO:
+- Extraçao dos ficheiros *.job do diretorio passado como arg ao programa principal para um array.
+
+
+TODO:
+- Fazer um loop com isto:
+		- abrir o ficheiro
+		- dar parse ao comando, linha a linha usando as funcoes dadas ja no codigo base
+		- executar os comandos linha a linha
+		- criar ficheiro de output com o mesmo nome e extensão .out que contém o resultado de todos os comandos contidos nos ficheiros .job.
+	notas: tenho de usar a interface POSIX com syscalls e file descriptors, sem usar a biblioteca stdio e sem a abstração FILE
+
+
+===============================================================
