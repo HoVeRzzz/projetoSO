@@ -47,4 +47,10 @@ void kvs_wait_backup();
 /// @param delay_us Delay in milliseconds.
 void kvs_wait(unsigned int delay_ms);
 
+size_t list_job_files(const char *dir_path, char files[][MAX_JOB_FILE_NAME_SIZE]);
+int count_job_files(const char *dir_path);
+char process_job_files(char *directory);
+void process_terminal_commands();
+
+
 #endif  // KVS_OPERATIONS_H
