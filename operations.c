@@ -6,12 +6,21 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/wait.h>
+#include <pthread.h>
 #include "kvs.h"
 #include "constants.h"
 #include "parser.h"
 
 static struct HashTable* kvs_table = NULL;
 static int backup_count = 0;
+
+
+typedef struct {
+    char job_file[MAX_JOB_FILE_NAME_SIZE];
+    int max_backups;
+} thread_data_t;
+
+pthread_mutex_t kvs_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /// Calculates a timespec from a delay in milliseconds.
 /// @param delay_ms Delay in milliseconds.
@@ -135,7 +144,7 @@ int kvs_backup(const char *job_file, int max_backups) {
         int fd = open(backup_file, O_WRONLY | O_CREAT | O_TRUNC, 0666);
         if (fd < 0) {
             perror("Failed to create backup file");
-            exit(1);
+            _exit(1);
         }
 
         for (int i = 0; i < TABLE_SIZE; i++) {
@@ -146,7 +155,7 @@ int kvs_backup(const char *job_file, int max_backups) {
                 if (len < 0) {
                     perror("Failed to format string");
                     close(fd);
-                    exit(1);
+                    _exit(1);
                 }
                 write(fd, buffer, (size_t)len);
                 keyNode = keyNode->next;
@@ -154,7 +163,7 @@ int kvs_backup(const char *job_file, int max_backups) {
         }
 
         close(fd);
-        exit(0);
+        _exit(0);
     } else {
         // Processo pai
         backup_count++;
@@ -299,7 +308,63 @@ void process_commands(int source, const char *job_file, int max_backups) {
     }
 }
 
-char process_job_files(char *directory, int max_backups) {
+void* process_job_file_thread(void* arg) {
+    thread_data_t* data = (thread_data_t*)arg;
+    char output_file[MAX_JOB_FILE_NAME_SIZE];
+    strncpy(output_file, data->job_file, MAX_JOB_FILE_NAME_SIZE - 1);
+    output_file[MAX_JOB_FILE_NAME_SIZE - 1] = '\0';
+    char *ext = strstr(output_file, ".job");
+    if (ext != NULL) {
+        strcpy(ext, ".out");
+    }
+
+    int input_fd = open(data->job_file, O_RDONLY);
+    if (input_fd < 0) {
+        fprintf(stderr, "Failed to open job file: %s\n", data->job_file);
+        pthread_exit(NULL);
+    }
+
+    int output_fd = open(output_file, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (output_fd < 0) {
+        fprintf(stderr, "Failed to create output file: %s\n", output_file);
+        close(input_fd);
+        pthread_exit(NULL);
+    }
+
+    int stdout_fd = dup(STDOUT_FILENO);
+    if (stdout_fd < 0) {
+        perror("Failed to save stdout");
+        close(input_fd);
+        close(output_fd);
+        pthread_exit(NULL);
+    }
+
+    if (dup2(output_fd, STDOUT_FILENO) < 0) {
+        perror("Failed to redirect stdout");
+        close(input_fd);
+        close(output_fd);
+        close(stdout_fd);
+        pthread_exit(NULL);
+    }
+
+    fflush(stdout);
+
+    pthread_mutex_lock(&kvs_mutex);
+    process_commands(input_fd, data->job_file, data->max_backups);
+    pthread_mutex_unlock(&kvs_mutex);
+
+    fflush(stdout);
+    if (dup2(stdout_fd, STDOUT_FILENO) < 0) {
+        perror("Failed to restore stdout");
+    }
+    close(stdout_fd);
+    close(input_fd);
+    close(output_fd);
+
+    pthread_exit(NULL);
+}
+
+char process_job_files(char *directory, int max_backups, int max_threads) {
     int num_files = count_job_files(directory);
     if (num_files <= 0) {
         fprintf(stderr, "No .job files found in directory: %s\n", directory);
@@ -308,55 +373,35 @@ char process_job_files(char *directory, int max_backups) {
 
     char job_files[num_files][MAX_JOB_FILE_NAME_SIZE];
     list_job_files(directory, job_files);
+    for (int i = 0; i < num_files; i++) {
+        printf("Processing job file: %s\n", job_files[i]);
+    }
+
+    pthread_t threads[max_threads];
+    thread_data_t thread_data[max_threads];
+    int thread_count = 0;
 
     for (int i = 0; i < num_files; i++) {
-        char output_file[MAX_JOB_FILE_NAME_SIZE];
-        strncpy(output_file, job_files[i], MAX_JOB_FILE_NAME_SIZE - 1);
-        output_file[MAX_JOB_FILE_NAME_SIZE - 1] = '\0';
+        strncpy(thread_data[thread_count].job_file, job_files[i], MAX_JOB_FILE_NAME_SIZE - 1);
+        thread_data[thread_count].job_file[MAX_JOB_FILE_NAME_SIZE - 1] = '\0';
+        thread_data[thread_count].max_backups = max_backups;
 
-        char *ext = strstr(output_file, ".job");
-        if (ext != NULL) {
-            strcpy(ext, ".out");
+        if (pthread_create(&threads[thread_count], NULL, process_job_file_thread, &thread_data[thread_count]) != 0) {
+            perror("Failed to create thread");
+            return 0;
         }
 
-        int input_fd = open(job_files[i], O_RDONLY);
-        if (input_fd < 0) {
-            fprintf(stderr, "Failed to open job file: %s\n", job_files[i]);
-            continue;
+        thread_count++;
+        if (thread_count == max_threads) {
+            for (int j = 0; j < thread_count; j++) {
+                pthread_join(threads[j], NULL);
+            }
+            thread_count = 0;
         }
+    }
 
-        int output_fd = open(output_file, O_WRONLY | O_CREAT | O_TRUNC, 0666);
-        if (output_fd < 0) {
-            fprintf(stderr, "Failed to create output file: %s\n", output_file);
-            close(input_fd);
-            continue;
-        }
-
-        int stdout_fd = dup(STDOUT_FILENO);
-        if (stdout_fd < 0) {
-            perror("Failed to save stdout");
-            close(input_fd);
-            close(output_fd);
-            continue;
-        }
-
-        if (dup2(output_fd, STDOUT_FILENO) < 0) {
-            perror("Failed to redirect stdout");
-            close(input_fd);
-            close(output_fd);
-            close(stdout_fd);
-            continue;
-        }
-
-        fflush(stdout);
-        process_commands(input_fd, job_files[i], max_backups);
-        fflush(stdout);
-        if (dup2(stdout_fd, STDOUT_FILENO) < 0) {
-            perror("Failed to restore stdout");
-        }
-        close(stdout_fd);
-        close(input_fd);
-        close(output_fd);
+    for (int j = 0; j < thread_count; j++) {
+        pthread_join(threads[j], NULL);
     }
 
     return 1;
