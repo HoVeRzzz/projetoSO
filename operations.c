@@ -373,9 +373,6 @@ char process_job_files(char *directory, int max_backups, int max_threads) {
 
     char job_files[num_files][MAX_JOB_FILE_NAME_SIZE];
     list_job_files(directory, job_files);
-    for (int i = 0; i < num_files; i++) {
-        printf("Processing job file: %s\n", job_files[i]);
-    }
 
     pthread_t threads[max_threads];
     thread_data_t thread_data[max_threads];
