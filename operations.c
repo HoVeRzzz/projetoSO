@@ -5,13 +5,11 @@
 #include <dirent.h>
 #include <unistd.h>
 #include <fcntl.h>
-
 #include <sys/wait.h>
 #include "kvs.h"
 #include "constants.h"
 #include "parser.h"
 
-extern int g_max_backups;
 static struct HashTable* kvs_table = NULL;
 static int backup_count = 0;
 
@@ -110,8 +108,8 @@ void kvs_show() {
     }
 }
 
-int kvs_backup(const char *job_file) {
-    if (backup_count >= g_max_backups) {
+int kvs_backup(const char *job_file, int max_backups) {
+    if (backup_count >= max_backups) {
         // Esperar que um processo filho termine
         wait(NULL);
         backup_count--;
@@ -164,7 +162,6 @@ int kvs_backup(const char *job_file) {
 
     return 0;
 }
-
 
 void kvs_wait(unsigned int delay_ms) {
     struct timespec delay = delay_to_timespec(delay_ms);
@@ -220,7 +217,7 @@ int count_job_files(const char *dir_path) {
     return count;
 }
 
-void process_commands(int source, const char *job_file) {
+void process_commands(int source, const char *job_file, int max_backups) {
     while (1) {
         char keys[MAX_WRITE_SIZE][MAX_STRING_SIZE] = {0};
         char values[MAX_WRITE_SIZE][MAX_STRING_SIZE] = {0};
@@ -275,7 +272,7 @@ void process_commands(int source, const char *job_file) {
                 }
                 break;
             case CMD_BACKUP:
-                if (kvs_backup(job_file)) {
+                if (kvs_backup(job_file, max_backups)) {
                     fprintf(stderr, "Failed to perform backup.\n");
                 }
                 break;
@@ -302,7 +299,7 @@ void process_commands(int source, const char *job_file) {
     }
 }
 
-char process_job_files(char *directory) {
+char process_job_files(char *directory, int max_backups) {
     int num_files = count_job_files(directory);
     if (num_files <= 0) {
         fprintf(stderr, "No .job files found in directory: %s\n", directory);
@@ -352,7 +349,7 @@ char process_job_files(char *directory) {
         }
 
         fflush(stdout);
-        process_commands(input_fd, job_files[i]);
+        process_commands(input_fd, job_files[i], max_backups);
         fflush(stdout);
         if (dup2(stdout_fd, STDOUT_FILENO) < 0) {
             perror("Failed to restore stdout");

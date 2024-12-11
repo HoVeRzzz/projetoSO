@@ -21,12 +21,11 @@ int kvs_write(size_t num_pairs, char keys[][MAX_STRING_SIZE], char values[][MAX_
 /// Reads values from the KVS.
 /// @param num_pairs Number of pairs to read.
 /// @param keys Array of keys' strings.
-/// @param fd File descriptor to write the (successful) output.
-/// @return 0 if the key reading, 1 otherwise.
+/// @return 0 if the pairs were read successfully, 1 otherwise.
 int kvs_read(size_t num_pairs, char keys[][MAX_STRING_SIZE]);
 
 /// Deletes key value pairs from the KVS.
-/// @param num_pairs Number of pairs to read.
+/// @param num_pairs Number of pairs to delete.
 /// @param keys Array of keys' strings.
 /// @return 0 if the pairs were deleted successfully, 1 otherwise.
 int kvs_delete(size_t num_pairs, char keys[][MAX_STRING_SIZE]);
@@ -37,20 +36,18 @@ void kvs_show();
 
 /// Creates a backup of the KVS state and stores it in the correspondent
 /// backup file
+/// @param job_file The job file name.
+/// @param max_backups The maximum number of backups allowed.
 /// @return 0 if the backup was successful, 1 otherwise.
-int kvs_backup();
-
-/// Waits for the last backup to be called.
-void kvs_wait_backup();
+int kvs_backup(const char *job_file, int max_backups);
 
 /// Waits for a given amount of time.
-/// @param delay_us Delay in milliseconds.
+/// @param delay_ms Delay in milliseconds.
 void kvs_wait(unsigned int delay_ms);
 
 size_t list_job_files(const char *dir_path, char files[][MAX_JOB_FILE_NAME_SIZE]);
 int count_job_files(const char *dir_path);
-char process_job_files(char *directory);
-void process_commands(int source, const char *job_file);
-
+char process_job_files(char *directory, int max_backups);
+void process_commands(int source, const char *job_file, int max_backups);
 
 #endif  // KVS_OPERATIONS_H
