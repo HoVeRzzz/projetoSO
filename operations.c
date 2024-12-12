@@ -64,27 +64,32 @@ int kvs_write(size_t num_pairs, char keys[][MAX_STRING_SIZE], char values[][MAX_
     return 0;
 }
 
-int kvs_read(size_t num_pairs, char keys[][MAX_STRING_SIZE]) {
+int kvs_read(int fd, size_t num_pairs, char keys[][MAX_STRING_SIZE]) {
     if (kvs_table == NULL) {
         fprintf(stderr, "KVS state must be initialized\n");
         return 1;
     }
 
-    printf("[");
+    write(fd, "[", 1);
     for (size_t i = 0; i < num_pairs; i++) {
         char* result = read_pair(kvs_table, keys[i]);
         if (result == NULL) {
-            printf("(%s,KVSERROR)", keys[i]);
+            char buffer[MAX_STRING_SIZE + 12];
+            int len = snprintf(buffer, sizeof(buffer), "(%s,KVSERROR)", keys[i]);
+            write(fd, buffer, (size_t)len);
         } else {
-            printf("(%s,%s)", keys[i], result);
+            char buffer[MAX_STRING_SIZE * 2 + 10];
+            int len = snprintf(buffer, sizeof(buffer), "(%s,%s)", keys[i], result);
+            write(fd, buffer, (size_t)len);
+            free(result);
         }
-        free(result);
     }
-    printf("]\n");
+    write(fd, "]\n", 2);
     return 0;
 }
 
-int kvs_delete(size_t num_pairs, char keys[][MAX_STRING_SIZE]) {
+
+int kvs_delete(int fd, size_t num_pairs, char keys[][MAX_STRING_SIZE]) {
     if (kvs_table == NULL) {
         fprintf(stderr, "KVS state must be initialized\n");
         return 1;
@@ -94,25 +99,30 @@ int kvs_delete(size_t num_pairs, char keys[][MAX_STRING_SIZE]) {
     for (size_t i = 0; i < num_pairs; i++) {
         if (delete_pair(kvs_table, keys[i]) != 0) {
             if (!aux) {
-                printf("[");
+                write(fd, "[", 1);
                 aux = 1;
             }
-            printf("(%s,KVSMISSING)", keys[i]);
+            char buffer[MAX_STRING_SIZE + 12];
+            int len = snprintf(buffer, sizeof(buffer), "(%s,KVSMISSING)", keys[i]);
+            write(fd, buffer, (size_t)len);
         }
     }
     if (aux) {
-        printf("]\n");
+        write(fd, "]\n", 2);
     }
 
     return 0;
 }
 
-void kvs_show() {
+
+void kvs_show(int fd) {
     for (int i = 0; i < TABLE_SIZE; i++) {
         KeyNode *keyNode = kvs_table->table[i];
         while (keyNode != NULL) {
-            printf("(%s, %s)\n", keyNode->key, keyNode->value);
-            keyNode = keyNode->next; // Move to the next node
+            char buffer[MAX_STRING_SIZE * 2 + 10];
+            int len = snprintf(buffer, sizeof(buffer), "(%s, %s)\n", keyNode->key, keyNode->value);
+            write(fd, buffer, (size_t)len);
+            keyNode = keyNode->next;
         }
     }
 }
@@ -226,16 +236,12 @@ int count_job_files(const char *dir_path) {
     return count;
 }
 
-void process_commands(int source, const char *job_file, int max_backups) {
+void process_commands(int source, int output_fd, const char *job_file, int max_backups) {
     while (1) {
         char keys[MAX_WRITE_SIZE][MAX_STRING_SIZE] = {0};
         char values[MAX_WRITE_SIZE][MAX_STRING_SIZE] = {0};
         unsigned int delay;
         size_t num_pairs;
-        if (source == STDIN_FILENO) {
-            printf("> ");
-            fflush(stdout);
-        }
         switch (get_next(source)) {
             case CMD_WRITE:
                 num_pairs = parse_write(source, keys, values, MAX_WRITE_SIZE, MAX_STRING_SIZE);
@@ -253,7 +259,7 @@ void process_commands(int source, const char *job_file, int max_backups) {
                     fprintf(stderr, "Invalid command. See HELP for usage\n");
                     continue;
                 }
-                if (kvs_read(num_pairs, keys)) {
+                if (kvs_read(output_fd, num_pairs, keys)) {
                     fprintf(stderr, "Failed to read pair\n");
                 }
                 break;
@@ -263,12 +269,12 @@ void process_commands(int source, const char *job_file, int max_backups) {
                     fprintf(stderr, "Invalid command. See HELP for usage\n");
                     continue;
                 }
-                if (kvs_delete(num_pairs, keys)) {
+                if (kvs_delete(output_fd, num_pairs, keys)) {
                     fprintf(stderr, "Failed to delete pair\n");
                 }
                 break;
             case CMD_SHOW:
-                kvs_show();
+                kvs_show(output_fd);
                 break;
             case CMD_WAIT:
                 if (parse_wait(source, &delay, NULL) == -1) {
@@ -289,7 +295,7 @@ void process_commands(int source, const char *job_file, int max_backups) {
                 fprintf(stderr, "Invalid command. See HELP for usage\n");
                 break;
             case CMD_HELP:
-                printf(
+                const char *help_msg =
                     "Available commands:\n"
                     "  WRITE [(key,value)(key2,value2),...]\n"
                     "  READ [key,key2,...]\n"
@@ -297,8 +303,8 @@ void process_commands(int source, const char *job_file, int max_backups) {
                     "  SHOW\n"
                     "  WAIT <delay_ms>\n"
                     "  BACKUP\n"
-                    "  HELP\n"
-                );
+                    "  HELP\n";
+                write(output_fd, help_msg, strlen(help_msg));
                 break;
             case CMD_EMPTY:
                 break;
@@ -331,33 +337,8 @@ void* process_job_file_thread(void* arg) {
         pthread_exit(NULL);
     }
 
-    int stdout_fd = dup(STDOUT_FILENO);
-    if (stdout_fd < 0) {
-        perror("Failed to save stdout");
-        close(input_fd);
-        close(output_fd);
-        pthread_exit(NULL);
-    }
+    process_commands(input_fd, output_fd, data->job_file, data->max_backups);
 
-    if (dup2(output_fd, STDOUT_FILENO) < 0) {
-        perror("Failed to redirect stdout");
-        close(input_fd);
-        close(output_fd);
-        close(stdout_fd);
-        pthread_exit(NULL);
-    }
-
-    fflush(stdout);
-
-    pthread_mutex_lock(&kvs_mutex);
-    process_commands(input_fd, data->job_file, data->max_backups);
-    pthread_mutex_unlock(&kvs_mutex);
-
-    fflush(stdout);
-    if (dup2(stdout_fd, STDOUT_FILENO) < 0) {
-        perror("Failed to restore stdout");
-    }
-    close(stdout_fd);
     close(input_fd);
     close(output_fd);
 
