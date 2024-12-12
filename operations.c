@@ -242,6 +242,15 @@ void process_commands(int source, int output_fd, const char *job_file, int max_b
         char values[MAX_WRITE_SIZE][MAX_STRING_SIZE] = {0};
         unsigned int delay;
         size_t num_pairs;
+        const char *help_msg =
+                    "Available commands:\n"
+                    "  WRITE [(key,value)(key2,value2),...]\n"
+                    "  READ [key,key2,...]\n"
+                    "  DELETE [key,key2,...]\n"
+                    "  SHOW\n"
+                    "  WAIT <delay_ms>\n"
+                    "  BACKUP\n"
+                    "  HELP\n";
         switch (get_next(source)) {
             case CMD_WRITE:
                 num_pairs = parse_write(source, keys, values, MAX_WRITE_SIZE, MAX_STRING_SIZE);
@@ -295,15 +304,6 @@ void process_commands(int source, int output_fd, const char *job_file, int max_b
                 fprintf(stderr, "Invalid command. See HELP for usage\n");
                 break;
             case CMD_HELP:
-                const char *help_msg =
-                    "Available commands:\n"
-                    "  WRITE [(key,value)(key2,value2),...]\n"
-                    "  READ [key,key2,...]\n"
-                    "  DELETE [key,key2,...]\n"
-                    "  SHOW\n"
-                    "  WAIT <delay_ms>\n"
-                    "  BACKUP\n"
-                    "  HELP\n";
                 write(output_fd, help_msg, strlen(help_msg));
                 break;
             case CMD_EMPTY:
