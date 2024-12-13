@@ -64,27 +64,48 @@ int kvs_write(size_t num_pairs, char keys[][MAX_STRING_SIZE], char values[][MAX_
     return 0;
 }
 
+typedef struct {
+    char key[MAX_STRING_SIZE];
+    char value[MAX_STRING_SIZE];
+} KeyValuePair;
+
+int compare_key_value_pairs(const void* a, const void* b) {
+    return strcmp(((KeyValuePair*)a)->key, ((KeyValuePair*)b)->key);
+}
+
 int kvs_read(int fd, size_t num_pairs, char keys[][MAX_STRING_SIZE]) {
     if (kvs_table == NULL) {
         fprintf(stderr, "KVS state must be initialized\n");
         return 1;
     }
 
-    write(fd, "[", 1);
+    KeyValuePair pairs[num_pairs];
+    size_t pair_count = 0;
+
     for (size_t i = 0; i < num_pairs; i++) {
         char* result = read_pair(kvs_table, keys[i]);
         if (result == NULL) {
-            char buffer[MAX_STRING_SIZE + 12];
-            int len = snprintf(buffer, sizeof(buffer), "(%s,KVSERROR)", keys[i]);
-            write(fd, buffer, (size_t)len);
+            snprintf(pairs[pair_count].key, MAX_STRING_SIZE, "%s", keys[i]);
+            snprintf(pairs[pair_count].value, MAX_STRING_SIZE, "KVSERROR");
         } else {
-            char buffer[MAX_STRING_SIZE * 2 + 10];
-            int len = snprintf(buffer, sizeof(buffer), "(%s,%s)", keys[i], result);
-            write(fd, buffer, (size_t)len);
+            snprintf(pairs[pair_count].key, MAX_STRING_SIZE, "%s", keys[i]);
+            snprintf(pairs[pair_count].value, MAX_STRING_SIZE, "%s", result);
             free(result);
         }
+        pair_count++;
+    }
+
+    // Sort pairs by key
+    qsort(pairs, pair_count, sizeof(KeyValuePair), compare_key_value_pairs);
+
+    write(fd, "[", 1);
+    for (size_t i = 0; i < pair_count; i++) {
+        char buffer[MAX_STRING_SIZE * 2 + 10];
+        int len = snprintf(buffer, sizeof(buffer), "(%s,%s)", pairs[i].key, pairs[i].value);
+        write(fd, buffer, (size_t)len);
     }
     write(fd, "]\n", 2);
+
     return 0;
 }
 

@@ -2,6 +2,8 @@
     "files.associations": {
         "parser.h": "c",
         "unistd.h": "c",
-        "constants.h": "c"
+        "constants.h": "c",
+        "random": "c",
+        "functional": "c"
     }
 }
