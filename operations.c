@@ -95,7 +95,7 @@ int kvs_read(int fd, size_t num_pairs, char keys[][MAX_STRING_SIZE]) {
         pair_count++;
     }
 
-    // Sort pairs by key
+    // Usa o QuickSort para ordenar por ordem alfabética crescente
     qsort(pairs, pair_count, sizeof(KeyValuePair), compare_key_value_pairs);
 
     write(fd, "[", 1);
